@@ -1,0 +1,74 @@
+//@version=6
+// =============================================================================
+// Taught to Trade - Configurable Stochastics
+// shorttitle: TT Stoch
+// -----------------------------------------------------------------------------
+// WHAT IT IS
+//   A stochastic oscillator that exposes the parts most versions hide: it plots
+//   fast %K, slow %K, and slow %D, and lets you pick the SMOOTHING method
+//   (SMA / EMA / WMA / HMA) instead of forcing plain SMA. Same classic stochastic
+//   math - more control over how it responds.
+//
+// HOW TO USE
+//   Read overbought/oversold and %K/%D crosses as you would any stochastic. Faster
+//   smoothing (HMA/WMA) reacts sooner but gives more false turns; slower (SMA) is
+//   steadier but later. Set YOUR OWN alerts from the conditions provided - this
+//   script does not send buy/sell signals.
+//
+// WHERE IT FAILS
+//   - Stochastics whipsaw in strong trends (they stay "overbought" while price keeps
+//     rising). Best as ranging/confirmation context, not a standalone trigger.
+//   - Signals evaluate on close and can change intrabar.
+//
+// Educational tool only - not investment advice. (c) 2026 Taught to Trade.
+// =============================================================================
+indicator("Taught to Trade - Configurable Stochastics", shorttitle = "TT Stoch", overlay = false)
+
+// ----- MA selector ----------------------------------------------------------
+f_ma(series float src, simple int len, simple string t) =>
+    switch t
+        "SMA" => ta.sma(src, len)
+        "EMA" => ta.ema(src, len)
+        "WMA" => ta.wma(src, len)
+        "HMA" => ta.hma(src, len)
+        => ta.sma(src, len)
+
+// ----- Inputs ---------------------------------------------------------------
+grp = "Stochastic"
+kLen    = input.int(14, "%K length",       minval = 1, group = grp)
+kSmooth = input.int(3,  "%K smoothing",    minval = 1, group = grp)
+dLen    = input.int(3,  "%D length",       minval = 1, group = grp)
+maType  = input.string("SMA", "Smoothing method", options = ["SMA","EMA","WMA","HMA"], group = grp, tooltip = "How %K and %D are smoothed. HMA/WMA react faster; SMA is steadier.")
+showFast= input.bool(true, "Show fast %K", group = grp)
+
+grpL = "Levels"
+obLvl = input.int(80, "Overbought", minval = 50, maxval = 100, group = grpL)
+osLvl = input.int(20, "Oversold",   minval = 0,  maxval = 50,  group = grpL)
+
+// ----- Calculations ---------------------------------------------------------
+fastK = ta.stoch(close, high, low, kLen)     // raw %K, 0..100
+slowK = f_ma(fastK, kSmooth, maType)
+slowD = f_ma(slowK, dLen, maType)
+
+// ----- Colors ---------------------------------------------------------------
+cK = color.new(#2F6FED, 0)
+cD = color.new(#E8A13C, 0)
+cF = color.new(#8A8F98, 40)
+
+// ----- Plots ----------------------------------------------------------------
+plot(showFast ? fastK : na, "Fast %K", color = cF, linewidth = 1)
+plot(slowK, "Slow %K", color = cK, linewidth = 2)
+plot(slowD, "Slow %D", color = cD, linewidth = 2)
+hline(obLvl, "Overbought", color = color.new(#C64545, 50), linestyle = hline.style_dashed)
+hline(50,    "Mid",        color = color.new(#8A8F98, 70))
+hline(osLvl, "Oversold",   color = color.new(#3F8F5F, 50), linestyle = hline.style_dashed)
+
+// ----- Signals + user alerts (no pushed buy/sell) ---------------------------
+bullCross = ta.crossover(slowK, slowD) and slowK < osLvl + 10
+bearCross = ta.crossunder(slowK, slowD) and slowK > obLvl - 10
+
+plotshape(bullCross, title = "K/D up in oversold",   style = shape.triangleup,   location = location.bottom, color = color.new(#3F8F5F,0), size = size.tiny)
+plotshape(bearCross, title = "K/D down in overbought",style = shape.triangledown, location = location.top,    color = color.new(#C64545,0), size = size.tiny)
+
+alertcondition(bullCross, "Stoch bullish cross (oversold)", "TT Stoch: %K crossed above %D from oversold on {{ticker}} ({{interval}}). Educational only - not a trade instruction.")
+alertcondition(bearCross, "Stoch bearish cross (overbought)","TT Stoch: %K crossed below %D from overbought on {{ticker}} ({{interval}}). Educational only - not a trade instruction.")

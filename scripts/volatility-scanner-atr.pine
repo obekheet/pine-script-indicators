@@ -1,0 +1,85 @@
+//@version=6
+// =============================================================================
+// Taught to Trade — Volatility Scanner (ATR%)
+// shorttitle: TT VolScan
+// -----------------------------------------------------------------------------
+// WHAT IT IS
+//   Ranks a watchlist by daily volatility — 14-period ATR as a percentage of price —
+//   and shows the most volatile names in a table, with Bitcoin as a reference. A "where
+//   is the movement" map, updated once per day from daily data.
+//
+// HOW TO USE
+//   Use the preloaded list or type your own symbols. Higher ATR% = more daily range.
+//   Read it to decide WHERE to look, then do your own analysis on those names.
+//
+// WHERE IT FAILS
+//   - Volatility is not direction or opportunity — a name can top the list while going
+//     nowhere or straight down. It measures range, nothing more.
+//   - Daily-based, so it lags intraday shifts. A thin/illiquid symbol can rank high on noise.
+//
+// Educational tool only — not investment advice. (c) 2026 Taught to Trade.
+// =============================================================================
+indicator("Taught to Trade — Volatility Scanner (ATR%)", shorttitle = "TT VolScan", overlay = true)
+
+// ----- Inputs (watchlist) ---------------------------------------------------
+grp = "Watchlist (leave blank to skip a slot)"
+s1  = input.symbol("BINANCE:BTCUSDT", "Reference (BTC)", group = grp)
+s2  = input.symbol("BINANCE:ETHUSDT", "Symbol 2",  group = grp)
+s3  = input.symbol("BINANCE:SOLUSDT", "Symbol 3",  group = grp)
+s4  = input.symbol("BINANCE:BNBUSDT", "Symbol 4",  group = grp)
+s5  = input.symbol("BINANCE:XRPUSDT", "Symbol 5",  group = grp)
+s6  = input.symbol("BINANCE:DOGEUSDT","Symbol 6",  group = grp)
+s7  = input.symbol("BINANCE:ADAUSDT", "Symbol 7",  group = grp)
+s8  = input.symbol("BINANCE:AVAXUSDT","Symbol 8",  group = grp)
+s9  = input.symbol("BINANCE:LINKUSDT","Symbol 9",  group = grp)
+s10 = input.symbol("BINANCE:DOTUSDT", "Symbol 10", group = grp)
+atrLen = input.int(14, "ATR length", minval = 1, group = "Settings")
+topN   = input.int(5, "Show top N", minval = 1, maxval = 9, group = "Settings")
+
+// ----- ATR% fetch (daily, no lookahead) -------------------------------------
+// request.security is called UNCONDITIONALLY for every slot (calling it inside an
+// if-branch is unreliable in Pine). Blank/duplicate slots are filtered afterward.
+f_atrp(simple string sym) =>
+    request.security(sym, "1D", ta.atr(atrLen) / close * 100.0, lookahead = barmerge.lookahead_off)
+
+// Short display name: strip the "EXCHANGE:" prefix if present.
+f_short(simple string s) =>
+    parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, 1) : s
+
+v2 = f_atrp(s2), v3 = f_atrp(s3), v4 = f_atrp(s4), v5 = f_atrp(s5), v6 = f_atrp(s6)
+v7 = f_atrp(s7), v8 = f_atrp(s8), v9 = f_atrp(s9), v10 = f_atrp(s10)
+refVal = f_atrp(s1)
+refName = f_short(s1)
+
+// Collect the non-reference slots into arrays, rebuilt each bar
+array<string> names = array.new<string>()
+array<float>  vals  = array.new<float>()
+f_add(simple string sym, float v) =>
+    if str.length(sym) > 0 and sym != s1
+        array.push(names, f_short(sym))
+        array.push(vals, v)
+
+f_add(s2, v2), f_add(s3, v3), f_add(s4, v4), f_add(s5, v5), f_add(s6, v6)
+f_add(s7, v7), f_add(s8, v8), f_add(s9, v9), f_add(s10, v10)
+
+// ----- Sort descending by volatility ----------------------------------------
+idx = array.sort_indices(vals, order.descending)
+
+// ----- Table (top N + reference) --------------------------------------------
+var table t = table.new(position.top_right, 3, topN + 2, border_width = 1)
+if barstate.islast
+    table.clear(t, 0, 0, 2, topN + 1)
+    table.cell(t, 0, 0, "Rank",  text_color = #F5F2EA, bgcolor = #0E1526, text_size = size.small)
+    table.cell(t, 1, 0, "Symbol",text_color = #F5F2EA, bgcolor = #0E1526, text_size = size.small)
+    table.cell(t, 2, 0, "ATR%",  text_color = #F5F2EA, bgcolor = #0E1526, text_size = size.small)
+    n = math.min(topN, array.size(idx))
+    for i = 0 to n - 1
+        j = array.get(idx, i)
+        table.cell(t, 0, i + 1, str.tostring(i + 1),                       text_color = #232838, bgcolor = #F5F2EA, text_size = size.small)
+        table.cell(t, 1, i + 1, array.get(names, j),                       text_color = #232838, bgcolor = #F5F2EA, text_size = size.small)
+        table.cell(t, 2, i + 1, str.tostring(array.get(vals, j), "#.##"),  text_color = #2F6FED, bgcolor = #F5F2EA, text_size = size.small)
+    // reference row
+    table.cell(t, 0, n + 1, "ref", text_color = #232838, bgcolor = #E8E4D8, text_size = size.small)
+    table.cell(t, 1, n + 1, refName, text_color = #232838, bgcolor = #E8E4D8, text_size = size.small)
+    table.cell(t, 2, n + 1, str.tostring(refVal, "#.##"), text_color = #232838, bgcolor = #E8E4D8, text_size = size.small)

@@ -1,0 +1,114 @@
+//@version=6
+// ============================================================================
+// Taught to Trade - ATR Trailing Stop with Flip Audit
+// ----------------------------------------------------------------------------
+// What it is: a trailing stop held a set number of ATRs from price. It ratchets
+// with the move and resets on the other side when price crosses it.
+//
+// Concept credit: "UT Bot Alerts" by QuantNomad and "UT Bot" by Yo_adriiiiaan
+// (who credits HPotter). This script is written from scratch; no code is copied.
+//
+// What it adds to the original:
+//   - The stop line is drawn (UT Bot Alerts only draws labels and bar colours).
+//   - The distance accepts fractions (the original input takes whole numbers).
+//   - Flips can be confirmed on bar close only; a flip seen mid-bar is drawn as
+//     a grey circle until the bar closes, so a vanishing flip is visible.
+//   - Heikin Ashi is computed in the script from the chart's own bars, with an
+//     option to measure ATR on the same Heikin Ashi candles.
+//   - A panel shows the current distance in ATRs, how many times the stop
+//     flipped in the last N bars, and how many flips reversed within a few bars.
+//
+// Where it fails: every flip is late by about the stop distance; at tight
+// settings ordinary pullbacks flip it; it has no neutral state; a flip records
+// that price crossed a stop, not that a trend began.
+//
+// Educational only - not investment advice. You set your own alerts; this
+// script does not send signals.
+// ============================================================================
+indicator("Taught to Trade - ATR Trailing Stop with Flip Audit", shorttitle = "TT StopAudit", overlay = true)
+
+// ---- Inputs ----------------------------------------------------------------
+grpS = "Stop"
+mult    = input.float(1.0, "Distance (x ATR)", minval = 0.1, step = 0.1, group = grpS, tooltip = "How far the stop trails, in ATRs. UT Bot Alerts calls this 'Key Value' and accepts whole numbers only; fractions are allowed here.")
+atrLen  = input.int(10, "ATR length", minval = 1, group = grpS, tooltip = "Wilder-smoothed average true range. Shorter reacts faster to a change in volatility.")
+srcMode = input.string("Close", "Price the stop follows", options = ["Close", "Heikin Ashi close", "Midpoint (H+L)/2"], group = grpS, tooltip = "Close matches UT Bot Alerts. Heikin Ashi close equals (open + high + low + close) / 4 of each real bar. Midpoint is the price Supertrend uses.")
+haAtr   = input.bool(false, "Measure ATR on Heikin Ashi candles too", group = grpS, tooltip = "Applies only to 'Heikin Ashi close'. Off measures ATR on the chart's own candles, which is what UT Bot Alerts does.")
+
+grpD = "Display and alerts"
+confirmOnly = input.bool(true, "Confirm flips on bar close", group = grpD, tooltip = "On: a flip is marked, and its alert can fire, only after the bar closes. A flip seen during the bar is drawn as a grey circle until then.")
+showLine    = input.bool(true, "Draw the stop line", group = grpD)
+showMarks   = input.bool(true, "Mark flips", group = grpD)
+
+grpP = "Panel"
+showPanel = input.bool(true, "Show panel", group = grpP)
+statsLen  = input.int(200, "Count flips over the last N bars", minval = 10, group = grpP)
+whipBars  = input.int(5, "Quick reversal = flips back within", minval = 1, group = grpP, tooltip = "A flip that is undone within this many bars is counted as a quick reversal (a whipsaw).")
+panelPos  = input.string("Bottom left", "Panel position", options = ["Bottom left", "Top left", "Top right", "Bottom right"], group = grpP)
+
+// ---- Heikin Ashi from the chart's own bars (no request.security) -----------
+float haClose = (open + high + low + close) / 4
+float haOpen = na
+haOpen := na(haOpen[1]) ? (open + close) / 2 : (haOpen[1] + haClose[1]) / 2
+float haHigh = math.max(high, math.max(haOpen, haClose))
+float haLow  = math.min(low, math.min(haOpen, haClose))
+float haTR   = na(haClose[1]) ? haHigh - haLow : math.max(haHigh - haLow, math.max(math.abs(haHigh - haClose[1]), math.abs(haLow - haClose[1])))
+
+// ---- Price, ATR, distance --------------------------------------------------
+bool  useHA = srcMode == "Heikin Ashi close"
+float price = useHA ? haClose : srcMode == "Midpoint (H+L)/2" ? hl2 : close
+float rangeForAtr = useHA and haAtr ? haTR : ta.tr(true)
+float atr  = ta.rma(rangeForAtr, atrLen)
+float dist = mult * atr
+
+// ---- The trailing stop -----------------------------------------------------
+// Above the previous stop on this bar and the last: the stop can only rise.
+// Below it on both: the stop can only fall. Otherwise price has just crossed
+// the previous stop, and the stop restarts on the other side.
+float stop = 0.0
+float ps = nz(stop[1])
+stop := price > ps and price[1] > ps ? math.max(ps, price - dist) : price < ps and price[1] < ps ? math.min(ps, price + dist) : price > ps ? price - dist : price + dist
+
+bool flipUp = ta.crossover(price, stop)
+bool flipDn = ta.crossunder(price, stop)
+bool flip   = flipUp or flipDn
+
+int side = 0
+side := price > stop ? 1 : price < stop ? -1 : nz(side[1])
+
+bool closed  = barstate.isconfirmed
+bool upShown = flipUp and (closed or not confirmOnly)
+bool dnShown = flipDn and (closed or not confirmOnly)
+bool pending = flip and confirmOnly and not closed
+
+// ---- Panel numbers (all computed every bar) --------------------------------
+int   gap     = ta.barssince(flip[1]) + 1
+bool  quick   = flip and not na(gap) and gap <= whipBars
+float flipsN  = math.sum(flip ? 1 : 0, statsLen)
+float quickN  = math.sum(quick ? 1 : 0, statsLen)
+float distAtr = atr > 0 ? math.abs(price - stop) / atr : na
+
+// ---- Drawing ---------------------------------------------------------------
+color upC = #3F8F5F
+color dnC = #C64545
+plot(showLine ? stop : na, "Trailing stop", color = side == 1 ? upC : side == -1 ? dnC : color.gray, linewidth = 2, style = plot.style_stepline)
+plotshape(showMarks and upShown, "Flip: price crossed above the stop", shape.triangleup, location.belowbar, upC, size = size.tiny)
+plotshape(showMarks and dnShown, "Flip: price crossed below the stop", shape.triangledown, location.abovebar, dnC, size = size.tiny)
+plotshape(showMarks and pending, "Unconfirmed flip (bar still open)", shape.circle, location.abovebar, color.gray, size = size.tiny)
+
+alertcondition(upShown, "Price crossed above the stop", "TT StopAudit: {{ticker}} {{interval}} price crossed above the trailing stop")
+alertcondition(dnShown, "Price crossed below the stop", "TT StopAudit: {{ticker}} {{interval}} price crossed below the trailing stop")
+
+pos = panelPos == "Top left" ? position.top_left : panelPos == "Top right" ? position.top_right : panelPos == "Bottom right" ? position.bottom_right : position.bottom_left
+var table panel = table.new(pos, 2, 5, bgcolor = color.new(#0B1220, 10), border_width = 1)
+if showPanel and barstate.islast
+    color tc = color.white
+    table.cell(panel, 0, 0, "TT Stop Audit", text_color = tc, text_size = size.small, text_halign = text.align_left)
+    table.cell(panel, 1, 0, str.tostring(mult, "#.##") + " x ATR(" + str.tostring(atrLen) + ")", text_color = tc, text_size = size.small)
+    table.cell(panel, 0, 1, "Price vs stop", text_color = tc, text_size = size.small, text_halign = text.align_left)
+    table.cell(panel, 1, 1, side == 1 ? "above" : side == -1 ? "below" : "-", text_color = side == 1 ? upC : side == -1 ? dnC : tc, text_size = size.small)
+    table.cell(panel, 0, 2, "Distance now", text_color = tc, text_size = size.small, text_halign = text.align_left)
+    table.cell(panel, 1, 2, na(distAtr) ? "n/a" : str.tostring(distAtr, "0.00") + " ATR", text_color = tc, text_size = size.small)
+    table.cell(panel, 0, 3, "Flips, last " + str.tostring(statsLen), text_color = tc, text_size = size.small, text_halign = text.align_left)
+    table.cell(panel, 1, 3, na(flipsN) ? "n/a" : str.tostring(flipsN, "#"), text_color = tc, text_size = size.small)
+    table.cell(panel, 0, 4, "Undone within " + str.tostring(whipBars), text_color = tc, text_size = size.small, text_halign = text.align_left)
+    table.cell(panel, 1, 4, na(quickN) ? "n/a" : str.tostring(quickN, "#"), text_color = tc, text_size = size.small)

@@ -1,0 +1,152 @@
+//@version=6
+// Taught to Trade - Swing Ratio Grid
+//
+// A retracement grid that makes its two hidden parameters visible.
+//
+// Every retracement rule depends on two things it usually refuses to state:
+//   (1) WHICH SWING you measured, and
+//   (2) WHICH RATIO SET you used.
+// This tool puts both on the chart. The swing comes from a pivot lookback you set
+// yourself, and the pivot is only used once it is CONFIRMED - that many bars after
+// it formed - so nothing here is drawn from information that did not exist at the time.
+//
+// The ratio set is switchable, including an arbitrary 0.4 / 0.5 / 0.6 control grid that
+// has no connection to the golden ratio. Switching between sets and watching how little
+// the levels move is the entire point of the tool.
+//
+// Marking where price traded is a fact. Nothing here predicts, ranks or scores anything,
+// and no buy/sell signal is sent. Alerts are conditions you arm yourself.
+//
+// All series reads happen at top level; conditional blocks touch only var scalars.
+indicator("Taught to Trade - Swing Ratio Grid", shorttitle = "TT SWING GRID",
+     overlay = true, max_bars_back = 5000)
+
+// ─────────────────────────────── Inputs ───────────────────────────────
+grpS = "Swing"
+pivLen = input.int(20, "Swing pivot lookback (bars each side)", minval = 2, maxval = 200, group = grpS,
+     tooltip = "The parameter most retracement rules leave unstated. A pivot is only confirmed this many bars AFTER it forms, so every level drawn here uses confirmed structure only. Raise it for fewer, larger swings.")
+
+grpR = "Ratio set"
+setName = input.string("Fibonacci", "Grid", group = grpR,
+     options = ["Fibonacci", "Arbitrary control (0.4/0.5/0.6)", "Thirds"],
+     tooltip = "Switch between the sets and watch how little the levels move. On most instruments the difference is smaller than one bar's range. That comparison is the reason this input exists.")
+
+grpD = "Draw"
+showGrid  = input.bool(true, "Grid levels",        group = grpD)
+showSwing = input.bool(true, "Swing high / low",   group = grpD)
+showTbl   = input.bool(true, "Readout table",      group = grpD)
+tblPosIn  = input.string("Bottom left", "Table position", group = grpD,
+     options = ["Bottom left", "Bottom right", "Top left", "Top right", "Middle right"],
+     tooltip = "Bottom left sits over the oldest bars, away from the price scale and the badges TradingView draws in the bottom-right corner.")
+
+colGrid  = input.color(color.new(#2F6FED, 0), "Grid",  group = grpD, inline = "c1")
+colSwing = input.color(color.new(#8A94A6, 0), "Swing", group = grpD, inline = "c1")
+
+// ──────────────────────── Pivots (top level only) ────────────────────────
+ph = ta.pivothigh(pivLen, pivLen)
+pl = ta.pivotlow(pivLen, pivLen)
+
+var float swHi    = na
+var int   swHiBar = na
+var float swLo    = na
+var int   swLoBar = na
+
+if not na(ph)
+    swHi    := ph
+    swHiBar := bar_index - pivLen
+if not na(pl)
+    swLo    := pl
+    swLoBar := bar_index - pivLen
+
+// ─────────────────────────── Ratio selection ───────────────────────────
+isFib   = setName == "Fibonacci"
+isThird = setName == "Thirds"
+
+r1 = isFib ? 0.236 : isThird ? 0.333 : 0.4
+r2 = isFib ? 0.382 : isThird ? 0.500 : 0.5
+r3 = isFib ? 0.500 : isThird ? 0.667 : 0.6
+r4 = isFib ? 0.618 : na
+r5 = isFib ? 0.786 : na
+
+bool  ok  = not na(swHi) and not na(swLo) and swHi > swLo
+float rng = ok ? swHi - swLo : na
+
+f_lvl(float r) => ok and not na(r) and rng > 0 ? swLo + rng * r : na
+
+l1 = f_lvl(r1)
+l2 = f_lvl(r2)
+l3 = f_lvl(r3)
+l4 = f_lvl(r4)
+l5 = f_lvl(r5)
+
+// ─────────────────────────────── Draw ───────────────────────────────
+plot(showGrid  ? l1 : na, "Grid level 1", color = colGrid,  linewidth = 1, style = plot.style_linebr)
+plot(showGrid  ? l2 : na, "Grid level 2", color = colGrid,  linewidth = 1, style = plot.style_linebr)
+plot(showGrid  ? l3 : na, "Grid level 3", color = colGrid,  linewidth = 2, style = plot.style_linebr)
+plot(showGrid  ? l4 : na, "Grid level 4", color = colGrid,  linewidth = 1, style = plot.style_linebr)
+plot(showGrid  ? l5 : na, "Grid level 5", color = colGrid,  linewidth = 1, style = plot.style_linebr)
+
+plot(showSwing and ok ? swHi : na, "Swing high", color = colSwing, linewidth = 1, style = plot.style_linebr)
+plot(showSwing and ok ? swLo : na, "Swing low",  color = colSwing, linewidth = 1, style = plot.style_linebr)
+
+// ─────────────────────────────── Table ───────────────────────────────
+bgCol  = color.new(#0E1526, 10)
+txtCol = color.new(#E6EAF2, 0)
+hdrCol = color.new(#2F6FED, 0)
+
+tblPos = tblPosIn == "Bottom right" ? position.bottom_right : tblPosIn == "Top left" ? position.top_left :
+     tblPosIn == "Top right" ? position.top_right : tblPosIn == "Middle right" ? position.middle_right : position.bottom_left
+
+var table t = table.new(tblPos, 2, 7, border_width = 1,
+     border_color = color.new(#2F6FED, 70))
+
+f_num(float v) => na(v) ? "-" : str.tostring(v, format.mintick)
+
+f_row(int r, string k, string v) =>
+    table.cell(t, 0, r, k, text_color = txtCol, text_size = size.small,
+         text_halign = text.align_left,  bgcolor = bgCol)
+    table.cell(t, 1, r, v, text_color = txtCol, text_size = size.small,
+         text_halign = text.align_right, bgcolor = bgCol)
+
+// retracement position of the current close inside the swing
+retrPct = ok and rng > 0 ? (close - swLo) / rng * 100.0 : na
+
+// short label for the active set
+setShort = isFib ? "Fibonacci" : isThird ? "Thirds" : "Control 0.4/0.5/0.6"
+
+if barstate.islast and showTbl
+    table.cell(t, 0, 0, "SWING GRID", text_color = color.white, text_size = size.small, bgcolor = hdrCol)
+    table.cell(t, 1, 0, setShort,     text_color = color.white, text_size = size.small, bgcolor = hdrCol)
+    f_row(1, "Swing high",        f_num(swHi))
+    f_row(2, "Swing low",         f_num(swLo))
+    f_row(3, "Swing range",       f_num(rng))
+    f_row(4, "Pivot lookback",    str.tostring(pivLen) + " bars each side")
+    f_row(5, "Confirmed after",   str.tostring(pivLen) + " bars")
+    f_row(6, "Close in swing",    na(retrPct) ? "-" : str.tostring(retrPct, "#.#") + "%")
+
+// ─────────────── Alerts (conditions you arm yourself) ───────────────
+// Every ta.* call is evaluated at top level on every bar so its history stays
+// consistent. Calling them inside the alertcondition expression would let the
+// short-circuit skip bars and corrupt the crossover state.
+xL1 = ta.cross(close, l1)
+xL2 = ta.cross(close, l2)
+xL3 = ta.cross(close, l3)
+xL4 = ta.cross(close, l4)
+xL5 = ta.cross(close, l5)
+xHi = ta.crossover(close, swHi)
+xLo = ta.crossunder(close, swLo)
+
+alertcondition(not na(l1) and xL1, title = "Close crossed grid level 1",
+     message = "Swing Ratio Grid: close crossed the first grid level.")
+alertcondition(not na(l2) and xL2, title = "Close crossed grid level 2",
+     message = "Swing Ratio Grid: close crossed the second grid level.")
+alertcondition(not na(l3) and xL3, title = "Close crossed the midpoint level",
+     message = "Swing Ratio Grid: close crossed the midpoint grid level.")
+alertcondition(not na(l4) and xL4, title = "Close crossed grid level 4",
+     message = "Swing Ratio Grid: close crossed the fourth grid level.")
+alertcondition(not na(l5) and xL5, title = "Close crossed grid level 5",
+     message = "Swing Ratio Grid: close crossed the fifth grid level.")
+alertcondition(not na(swHi) and xHi, title = "Close crossed above the swing high",
+     message = "Swing Ratio Grid: close crossed above the confirmed swing high.")
+alertcondition(not na(swLo) and xLo, title = "Close crossed below the swing low",
+     message = "Swing Ratio Grid: close crossed below the confirmed swing low.")

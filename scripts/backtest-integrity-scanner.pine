@@ -1,0 +1,103 @@
+//@version=6
+// Taught to Trade - Backtest Integrity Scanner
+// Measures the properties of THIS chart that quietly break backtests.
+// It does not read your strategy. It measures the instrument and timeframe
+// your strategy is being tested on, and tells you which assumptions are unsafe here.
+// No buy/sell signals. Alerts are yours to configure.
+indicator("Taught to Trade - Backtest Integrity Scanner", shorttitle = "TT BIS", overlay = true, max_bars_back = 1000)
+
+grpC = "Cost assumptions"
+commPct = input.float(0.04, "Commission per side (%)", minval = 0.0, step = 0.01, group = grpC, tooltip = "What one side of a round trip actually costs you, as a percentage of notional. Use your broker real number, not zero.")
+slipPct = input.float(0.02, "Slippage per side (%)", minval = 0.0, step = 0.01, group = grpC, tooltip = "Expected slippage per side. Zero is the single most common dishonest backtest setting.")
+
+grpS = "Sample"
+lookback = input.int(500, "Sample window (bars)", minval = 50, maxval = 1000, group = grpS)
+holdBars = input.int(20, "Assumed bars held per trade", minval = 1, group = grpS, tooltip = "Used only to estimate how many trades your history could produce. Change it to match your strategy.")
+minTrades = input.int(30, "Minimum trades you would accept", minval = 5, group = grpS)
+
+grpD = "Data checks"
+atrLen  = input.int(14, "ATR length", minval = 2, group = grpD)
+gapMult = input.float(2.0, "Flag gaps larger than (x ATR)", minval = 0.5, step = 0.5, group = grpD)
+costWarn = input.float(25.0, "Warn when cost exceeds this % of a median bar", minval = 1.0, step = 5.0, group = grpD)
+showGaps = input.bool(true, "Mark flagged gap bars on the chart", group = grpD)
+
+grpT = "Table"
+posIn  = input.string("Top right", "Position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = grpT)
+szIn   = input.string("Small", "Text size", options = ["Tiny", "Small", "Normal"], group = grpT)
+
+atr = ta.atr(atrLen)
+
+barsAvail = bar_index + 1
+var int tFirst = na
+if na(tFirst)
+    tFirst := time
+yearsData = (time - tFirst) / 31557600000.0
+approxTrades = math.floor(barsAvail / math.max(holdBars, 1))
+
+barRangePct = close > 0 ? (high - low) / close * 100.0 : na
+medRangePct = ta.percentile_linear_interpolation(barRangePct, lookback, 50)
+roundTripPct = (commPct + slipPct) * 2.0
+costShare = medRangePct > 0 ? roundTripPct / medRangePct * 100.0 : na
+
+gapPct = close[1] > 0 ? math.abs(open - close[1]) / close[1] * 100.0 : na
+avgGapPct = ta.sma(gapPct, lookback)
+headVsCost = roundTripPct > 0 ? avgGapPct / roundTripPct : na
+
+zeroVolBars = math.sum(nz(volume, 0) == 0 ? 1 : 0, lookback)
+bigGapBars  = math.sum(math.abs(open - close[1]) > atr * gapMult ? 1 : 0, lookback)
+
+atrPct = close > 0 ? atr / close * 100.0 : na
+p33 = ta.percentile_linear_interpolation(atrPct, lookback, 33)
+p67 = ta.percentile_linear_interpolation(atrPct, lookback, 67)
+regimeNow = na(atrPct) ? "n/a" : atrPct <= p33 ? "Low" : atrPct <= p67 ? "Mid" : "High"
+shareHigh = math.sum(atrPct > p67 ? 1 : 0, lookback) / lookback * 100.0
+shareLow  = math.sum(atrPct <= p33 ? 1 : 0, lookback) / lookback * 100.0
+
+okCol   = color.new(#2E7D32, 0)
+warnCol = color.new(#B26A00, 0)
+badCol  = color.new(#B3261E, 0)
+bgCol   = color.new(#0E1526, 10)
+txtCol  = color.new(#E6EAF2, 0)
+hdrCol  = color.new(#2F6FED, 0)
+
+f_flagCol(bool bad, bool warn) => bad ? badCol : warn ? warnCol : okCol
+f_flagTxt(bool bad, bool warn) => bad ? "CHECK" : warn ? "WATCH" : "OK"
+
+tradesBad  = approxTrades < minTrades
+costBad    = not na(costShare) and costShare > costWarn
+costWarnF  = not na(costShare) and costShare > costWarn / 2.0
+headBad    = not na(headVsCost) and headVsCost > 1.0
+volBad     = zeroVolBars > 0
+gapWarnF   = bigGapBars > 0
+regimeBad  = shareHigh > 60.0 or shareLow > 60.0
+
+tblPos = posIn == "Top left" ? position.top_left : posIn == "Bottom right" ? position.bottom_right : posIn == "Bottom left" ? position.bottom_left : position.top_right
+tblSz  = szIn == "Tiny" ? size.tiny : szIn == "Normal" ? size.normal : size.small
+
+var table t = table.new(tblPos, 3, 10, border_width = 1, border_color = color.new(#2F6FED, 70))
+
+f_row(int r, string label, string val, color c, string flag) =>
+    table.cell(t, 0, r, label, text_color = txtCol, text_size = tblSz, text_halign = text.align_left, bgcolor = bgCol)
+    table.cell(t, 1, r, val, text_color = txtCol, text_size = tblSz, text_halign = text.align_right, bgcolor = bgCol)
+    table.cell(t, 2, r, flag, text_color = color.white, text_size = tblSz, text_halign = text.align_center, bgcolor = c)
+
+if barstate.islast
+    table.cell(t, 0, 0, "BACKTEST INTEGRITY", text_color = color.white, text_size = tblSz, text_halign = text.align_left, bgcolor = hdrCol)
+    table.cell(t, 1, 0, str.tostring(barsAvail) + " bars", text_color = color.white, text_size = tblSz, text_halign = text.align_right, bgcolor = hdrCol)
+    table.cell(t, 2, 0, str.tostring(yearsData, "#.0") + "y", text_color = color.white, text_size = tblSz, text_halign = text.align_center, bgcolor = hdrCol)
+    f_row(1, "Approx trades available", str.tostring(approxTrades), f_flagCol(tradesBad, approxTrades < minTrades * 2), f_flagTxt(tradesBad, approxTrades < minTrades * 2))
+    f_row(2, "Median bar range", str.tostring(medRangePct, "#.###") + "%", bgCol, "")
+    f_row(3, "Round-trip cost", str.tostring(roundTripPct, "#.###") + "%", bgCol, "")
+    f_row(4, "Cost / median bar", na(costShare) ? "n/a" : str.tostring(costShare, "#.#") + "%", f_flagCol(costBad, costWarnF), f_flagTxt(costBad, costWarnF))
+    f_row(5, "One-bar head start", na(avgGapPct) ? "n/a" : str.tostring(avgGapPct, "#.###") + "%", bgCol, "")
+    f_row(6, "Head start / cost", na(headVsCost) ? "n/a" : str.tostring(headVsCost, "#.##") + "x", f_flagCol(headBad, false), f_flagTxt(headBad, false))
+    f_row(7, "Zero-volume bars", str.tostring(zeroVolBars), f_flagCol(volBad, false), f_flagTxt(volBad, false))
+    f_row(8, "Gaps > " + str.tostring(gapMult, "#.#") + "x ATR", str.tostring(bigGapBars), f_flagCol(false, gapWarnF), f_flagTxt(false, gapWarnF))
+    f_row(9, "Volatility regime now", regimeNow + "  (hi " + str.tostring(shareHigh, "#") + "% / lo " + str.tostring(shareLow, "#") + "%)", f_flagCol(regimeBad, false), f_flagTxt(regimeBad, false))
+
+plotshape(showGaps and math.abs(open - close[1]) > atr * gapMult, title = "Gap bar", style = shape.triangleup, location = location.belowbar, size = size.tiny, color = color.new(#B26A00, 20))
+
+alertcondition(costBad, title = "Cost exceeds threshold share of a median bar", message = "Backtest Integrity Scanner: round-trip cost now exceeds the configured share of a median bar range on this chart.")
+alertcondition(headBad, title = "One-bar head start worth more than costs", message = "Backtest Integrity Scanner: the average one-bar gap on this chart is larger than a full round-trip cost.")
+alertcondition(volBad, title = "Zero-volume bars present in sample", message = "Backtest Integrity Scanner: zero-volume bars are present in the sample window on this chart.")
+alertcondition(regimeBad, title = "Sample dominated by one volatility regime", message = "Backtest Integrity Scanner: the sample window is dominated by a single volatility regime on this chart.")

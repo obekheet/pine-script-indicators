@@ -1,0 +1,91 @@
+// Licence: Mozilla Public License 2.0
+// Taught to Trade - WaveTrend Audit
+// Written from scratch. The WaveTrend method is LazyBear's (WaveTrend Oscillator, 2014); credit to him.
+// No code reused. Educational tool: it marks crosses on CLOSED bars only and counts, on the loaded history,
+// how often the oscillator sits beyond each level and how often the lines cross.
+//@version=6
+indicator("Taught to Trade - WaveTrend Audit", shorttitle="TT WaveTrend Audit", overlay=false, max_labels_count=500)
+
+// ---- Inputs
+n1      = input.int(10, "Channel length (EMA)", minval=1)
+n2      = input.int(21, "Average length (EMA)", minval=1)
+sigLen  = input.int(4, "Signal length (SMA)", minval=1)
+lvl1    = input.float(60.0, "Outer level (+/-)", minval=0.0, step=0.5)
+lvl2    = input.float(53.0, "Inner level (+/-)", minval=0.0, step=0.5)
+confirm = input.bool(true, "Mark crosses only on closed bars")
+showTbl = input.bool(true, "Show audit panel")
+tblPos  = input.string("Top right", "Panel position", options=["Top right", "Top left", "Bottom left", "Bottom right"])
+
+// ---- WaveTrend maths (top level)
+ap   = hlc3
+esa  = ta.ema(ap, n1)
+dev  = ta.ema(math.abs(ap - esa), n1)
+ci   = dev == 0 ? 0.0 : (ap - esa) / (0.015 * dev)
+wt1  = ta.ema(ci, n2)
+wt2  = ta.sma(wt1, sigLen)
+
+xUp  = ta.crossover(wt1, wt2)
+xDn  = ta.crossunder(wt1, wt2)
+okBar = confirm ? barstate.isconfirmed : true
+upC  = xUp and okBar
+dnC  = xDn and okBar
+pend = confirm and not barstate.isconfirmed and (xUp or xDn)
+
+// ---- Plots
+hline(lvl1, "Outer +", color=color.new(color.red, 40))
+hline(lvl2, "Inner +", color=color.new(color.red, 70), linestyle=hline.style_dotted)
+hline(0, "Zero", color=color.new(color.gray, 60))
+hline(-lvl2, "Inner -", color=color.new(color.teal, 70), linestyle=hline.style_dotted)
+hline(-lvl1, "Outer -", color=color.new(color.teal, 40))
+plot(wt1 - wt2, "WT1 - WT2", color=color.new(color.gray, 70), style=plot.style_area)
+plot(wt1, "WT1", color=color.new(color.teal, 0), linewidth=2)
+plot(wt2, "WT2 (signal)", color=color.new(color.orange, 0), linewidth=1)
+plotshape(upC ? wt2 : na, "Cross up (closed bar)", shape.circle, location.absolute, color.new(color.teal, 0), size=size.tiny)
+plotshape(dnC ? wt2 : na, "Cross down (closed bar)", shape.circle, location.absolute, color.new(color.orange, 0), size=size.tiny)
+plotshape(pend ? wt2 : na, "Cross pending (open bar)", shape.circle, location.absolute, color.new(color.gray, 0), size=size.tiny)
+
+// ---- Audit counters (closed bars only, so the open bar never double counts)
+var int nBars = 0
+var int nAbove1 = 0
+var int nBelow1 = 0
+var int nBeyond2 = 0
+var int nCross = 0
+var int nCrossOut = 0
+var int lastX = na
+var array<int> gaps = array.new<int>()
+valid = not na(wt2)
+if barstate.isconfirmed and valid
+    nBars += 1
+    nAbove1 += wt1 > lvl1 ? 1 : 0
+    nBelow1 += wt1 < -lvl1 ? 1 : 0
+    nBeyond2 += math.abs(wt1) > lvl2 ? 1 : 0
+    if xUp or xDn
+        nCross += 1
+        nCrossOut += math.abs(wt2) > lvl1 ? 1 : 0
+        if not na(lastX)
+            gaps.push(bar_index - lastX)
+        lastX := bar_index
+
+pct(a, b) => b > 0 ? str.tostring(100.0 * a / b, "#.0") + "%" : "-"
+pos = tblPos == "Top left" ? position.top_left : tblPos == "Bottom left" ? position.bottom_left : tblPos == "Bottom right" ? position.bottom_right : position.top_right
+var table t = table.new(pos, 2, 7, bgcolor=color.new(color.black, 20), border_width=1)
+if showTbl and barstate.islast
+    medGap = gaps.size() > 0 ? str.tostring(gaps.median(), "#.#") : "-"
+    table.cell(t, 0, 0, "WaveTrend Audit", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 0, str.tostring(nBars) + " closed bars", text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 1, "Above +" + str.tostring(lvl1), text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 1, pct(nAbove1, nBars), text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 2, "Below -" + str.tostring(lvl1), text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 2, pct(nBelow1, nBars), text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 3, "Beyond +/-" + str.tostring(lvl2), text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 3, pct(nBeyond2, nBars), text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 4, "Crosses", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 4, str.tostring(nCross), text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 5, "Median bars between", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 5, medGap, text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 6, "Crosses beyond +/-" + str.tostring(lvl1), text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 6, pct(nCrossOut, nCross), text_color=color.white, text_size=size.small)
+
+// ---- Alerts only (no pushed signals)
+alertcondition(upC, "WT1 crossed above WT2 (closed bar)", "WaveTrend: WT1 crossed above WT2 on a closed bar")
+alertcondition(dnC, "WT1 crossed below WT2 (closed bar)", "WaveTrend: WT1 crossed below WT2 on a closed bar")
