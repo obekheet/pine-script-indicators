@@ -12,6 +12,7 @@ What they have in common:
 
 | Script | What it shows | TradingView | Explained |
 |---|---|---|---|
+| Range Filter Audit | The Range Filter rebuilt from scratch: the price that would turn the filter drawn on the chart, closed-bar vs open-bar turns, a Twin Range Filter preset, and a count of turns reversed within a few bars. | [script](https://www.tradingview.com/script/qGydpugy-Taught-to-Trade-Range-Filter-Audit/) | [Range Filter, from its source](https://taughttotrade.com/range-filter) |
 | ATR Trailing Stop with Flip Audit | An ATR trailing stop with its stop line drawn, flips confirmed only at the bar close, and a count of flips undone within a few bars. Rebuilds the stop rule behind UT Bot Alerts from scratch. | [script](https://www.tradingview.com/script/9U7ccJIN-Taught-to-Trade-ATR-Trailing-Stop-with-Flip-Audit/) | [UT Bot Alerts, from its source](https://taughttotrade.com/ut-bot-alerts) |
 | WaveTrend Audit | LazyBear's WaveTrend oscillator rewritten from scratch. Crosses marked on closed bars only, plus a panel counting how often the line sits beyond each level and how often the lines cross. | [script](https://www.tradingview.com/script/phF1Cmji-Taught-to-Trade-WaveTrend-Audit/) | [WaveTrend, from its source](https://taughttotrade.com/wavetrend) |
 | Sample Size Panel | Enter a trade count and the rate that worked; it shows the range the true rate plausibly sits in (Wilson interval) and whether that range can be told apart from 50 percent. | [script](https://www.tradingview.com/script/qZkLfGBu-Taught-to-Trade-Sample-Size-Panel/) | |
@@ -30,10 +31,11 @@ Either open the TradingView link and add it to your chart, or paste the `.pine` 
 
 ## Credit for the rebuilds
 
-Two scripts rebuild popular community indicators. No code was copied from either: the method was reimplemented from its published maths, and the script header and TradingView description credit the original authors.
+Three scripts rebuild popular community indicators. No code was copied from any of them: the method was reimplemented from its published maths, and the script header and TradingView description credit the original authors.
 
 - **ATR Trailing Stop with Flip Audit:** the stop rule popularised by *UT Bot Alerts* by QuantNomad, built on *UT Bot* by Yo_adriiiiaan, who credits HPotter.
 - **WaveTrend Audit:** the *WaveTrend Oscillator* by LazyBear (2014).
+- **Range Filter Audit:** the *Range Filter* method by DonovanWall, as used in guikroth's 5min variant, VuManChu Swing Free (Jazal) and colinmck's Twin Range Filter.
 
 ## Where this fails
 
