@@ -1,0 +1,117 @@
+//@version=6
+// Taught to Trade - Range Filter Audit
+// Written from scratch from the published Range Filter method (DonovanWall; guikroth 5min variant;
+// colinmck Twin Range Filter). Credit to those authors. Educational tool: it marks where the filter
+// turns and audits how often those turns reverse. It does not give buy or sell instructions.
+indicator("Taught to Trade - Range Filter Audit", shorttitle = "RF Audit", overlay = true)
+
+// ---------- Inputs
+src      = input.source(close, "Source")
+preset   = input.string("Single range", "Range", options = ["Single range", "Twin (fast + slow averaged)"])
+per      = input.int(100, "Sampling period (single)", minval = 1)
+mult     = input.float(3.0, "Range multiplier (single)", minval = 0.1, step = 0.1)
+fastPer  = input.int(27, "Fast period (twin)", minval = 1, group = "Twin")
+fastMult = input.float(1.6, "Fast multiplier (twin)", minval = 0.1, step = 0.1, group = "Twin")
+slowPer  = input.int(55, "Slow period (twin)", minval = 1, group = "Twin")
+slowMult = input.float(2.0, "Slow multiplier (twin)", minval = 0.1, step = 0.1, group = "Twin")
+undoN    = input.int(5, "Count a turn as undone if reversed within N bars", minval = 1, group = "Audit")
+showLvl  = input.bool(true, "Draw the turn level", group = "Audit")
+showTbl  = input.bool(true, "Show audit panel", group = "Audit")
+tblPos   = input.string("Bottom left", "Panel position", options = ["Bottom left", "Top left", "Top right", "Bottom right"], group = "Audit")
+
+// ---------- Range r: EMA of the absolute bar-to-bar change, smoothed again over 2 x period - 1, times the multiplier
+avgRange(int len, float m) =>
+    ta.ema(ta.ema(math.abs(src - src[1]), len), len * 2 - 1) * m
+
+rSingle = avgRange(per, mult)
+rFast   = avgRange(fastPer, fastMult)
+rSlow   = avgRange(slowPer, slowMult)
+r       = preset == "Single range" ? rSingle : (rFast + rSlow) / 2
+
+// ---------- Filter: a ratchet that moves only when price is more than r away from it
+var float filt = na
+float prevF = nz(filt[1])
+filt := src > prevF ? math.max(prevF, src - r) : math.min(prevF, src + r)
+
+// Last direction the filter stepped (1 up, -1 down, held while flat)
+var int stepDir = 0
+stepDir := filt > nz(filt[1]) ? 1 : filt < nz(filt[1]) ? -1 : stepDir
+
+// ---------- Turns: same rule as the original labels, shown as neutral markers
+bool moved  = src != src[1]
+bool upSide = src > filt and stepDir == 1 and moved
+bool dnSide = src < filt and stepDir == -1 and moved
+var int side = 0
+bool turnUp = upSide and side == -1
+bool turnDn = dnSide and side == 1
+side := upSide ? 1 : dnSide ? -1 : side
+
+// Turn level: the close that would turn the filter the other way (filter -/+ r = extreme close -/+ 2 r)
+float lvl = side == 1 ? filt - r : side == -1 ? filt + r : na
+float distR = na(lvl) or r == 0 ? na : math.abs(src - lvl) / r
+
+// ---------- Audit counters (closed bars only)
+var int turns = 0
+var int undone = 0
+var int firstTurn = na
+var int lastTurn = na
+var int flatBars = 0
+var int counted = 0
+if barstate.isconfirmed and not na(r)
+    counted += 1
+    if filt == nz(filt[1])
+        flatBars += 1
+    if turnUp or turnDn
+        if not na(lastTurn) and bar_index - lastTurn <= undoN
+            undone += 1
+        turns += 1
+        firstTurn := na(firstTurn) ? bar_index : firstTurn
+        lastTurn := bar_index
+
+// Live check: turns that showed on the open bar and were gone at its close (counts from when the script is loaded)
+varip int liveSeen = 0
+varip int liveGone = 0
+varip bool liveFlag = false
+if barstate.isrealtime
+    if not barstate.isconfirmed and (turnUp or turnDn)
+        liveFlag := true
+    if barstate.isconfirmed
+        if liveFlag
+            liveSeen += 1
+            if not (turnUp or turnDn)
+                liveGone += 1
+        liveFlag := false
+
+// ---------- Plots
+color fCol = stepDir == 1 ? color.new(color.teal, 0) : stepDir == -1 ? color.new(color.orange, 0) : color.gray
+plot(filt, "Range filter", color = fCol, linewidth = 2)
+plot(showLvl ? lvl : na, "Turn level", color = color.new(color.gray, 20), style = plot.style_linebr, linewidth = 1)
+plotshape(turnUp and barstate.isconfirmed, "Turned up (closed bar)", shape.triangleup, location.belowbar, color.new(color.teal, 0), size = size.tiny)
+plotshape(turnDn and barstate.isconfirmed, "Turned down (closed bar)", shape.triangledown, location.abovebar, color.new(color.orange, 0), size = size.tiny)
+plotshape(turnUp and not barstate.isconfirmed, "Turn up, bar still open", shape.circle, location.belowbar, color.new(color.gray, 0), size = size.tiny)
+plotshape(turnDn and not barstate.isconfirmed, "Turn down, bar still open", shape.circle, location.abovebar, color.new(color.gray, 0), size = size.tiny)
+
+alertcondition(turnUp, "Range filter turned up", "Range Filter Audit: filter turned up on {{ticker}} {{interval}}")
+alertcondition(turnDn, "Range filter turned down", "Range Filter Audit: filter turned down on {{ticker}} {{interval}}")
+
+// ---------- Panel
+pos = tblPos == "Top left" ? position.top_left : tblPos == "Top right" ? position.top_right : tblPos == "Bottom right" ? position.bottom_right : position.bottom_left
+var table t = table.new(pos, 2, 8, bgcolor = color.new(color.black, 15), border_width = 1)
+if showTbl and barstate.islast
+    txt = color.white
+    table.cell(t, 0, 0, "Taught to Trade", text_color = txt, text_size = size.small)
+    table.cell(t, 1, 0, "Range Filter Audit", text_color = txt, text_size = size.small)
+    table.cell(t, 0, 1, "Range r", text_color = txt, text_size = size.small)
+    table.cell(t, 1, 1, str.tostring(r, format.mintick), text_color = txt, text_size = size.small)
+    table.cell(t, 0, 2, "Turn level", text_color = txt, text_size = size.small)
+    table.cell(t, 1, 2, na(lvl) ? "-" : str.tostring(lvl, format.mintick) + " (" + str.tostring(distR, "#.0") + " r away)", text_color = txt, text_size = size.small)
+    table.cell(t, 0, 3, "Turns (closed bars)", text_color = txt, text_size = size.small)
+    table.cell(t, 1, 3, str.tostring(turns), text_color = txt, text_size = size.small)
+    table.cell(t, 0, 4, "Reversed within " + str.tostring(undoN), text_color = txt, text_size = size.small)
+    table.cell(t, 1, 4, turns > 1 ? str.tostring(undone) + " (" + str.tostring(100.0 * undone / (turns - 1), "#") + "%)" : "-", text_color = txt, text_size = size.small)
+    table.cell(t, 0, 5, "Bars per turn", text_color = txt, text_size = size.small)
+    table.cell(t, 1, 5, turns > 1 ? str.tostring((lastTurn - firstTurn) / (turns - 1.0), "#.0") : "-", text_color = txt, text_size = size.small)
+    table.cell(t, 0, 6, "Filter flat", text_color = txt, text_size = size.small)
+    table.cell(t, 1, 6, counted > 0 ? str.tostring(100.0 * flatBars / counted, "#") + "% of bars" : "-", text_color = txt, text_size = size.small)
+    table.cell(t, 0, 7, "Live turns gone at close", text_color = txt, text_size = size.small)
+    table.cell(t, 1, 7, str.tostring(liveGone) + " of " + str.tostring(liveSeen), text_color = txt, text_size = size.small)
